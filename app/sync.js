@@ -269,19 +269,30 @@
     setStatus("off");
   }
 
+  /**
+   * Un lien « …#sync=CODE » relie l'appareil d'un coup (le fragment n'est jamais envoyé au serveur web).
+   * Retourne true si un nouveau code a été pris en compte.
+   */
+  function readLinkHash() {
+    const m = /[#&]sync=([A-Za-z0-9-]+)/.exec(location.hash);
+    if (!m) return false;
+    history.replaceState(null, "", location.pathname + location.search);
+    const code = normalizeCode(m[1]);
+    if (!enabled || code.replace(/-/g, "").length < 20) return false;
+    if (code !== meta.key) {
+      meta = { key: code, version: "", dirty: true, hash: "" };
+      storeMeta();
+    }
+    hooks.onLinked?.();
+    return true;
+  }
+
   function init(h) {
     hooks = h;
     takeSnapshot(hooks.getState());
-    // Un lien « …#sync=CODE » configure l'appareil d'un coup (le fragment n'est jamais envoyé au serveur web).
-    const m = /[#&]sync=([A-Za-z0-9-]+)/.exec(location.hash);
-    if (m) {
-      history.replaceState(null, "", location.pathname + location.search);
-      if (enabled && normalizeCode(m[1]).length >= 20) {
-        meta = { key: normalizeCode(m[1]), version: "", dirty: true, hash: "" };
-        storeMeta();
-        hooks.onLinked?.();
-      }
-    }
+    readLinkHash();
+    // Lien collé dans un onglet où l'app est déjà ouverte : seul le fragment change, pas de rechargement.
+    global.addEventListener("hashchange", () => { if (readLinkHash()) pull(); });
     if (!enabled) { setStatus("unconfigured"); return; }
     // Récupère les changements faits sur un autre appareil quand on revient sur l'app.
     document.addEventListener("visibilitychange", () => { if (!document.hidden) pull(); });
