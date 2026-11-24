@@ -1,9 +1,8 @@
 /*
- * Synchronisation des points entre appareils, via Supabase, sans compte.
+ * Synchronisation des points entre appareils, via Firebase (Firestore), sans compte.
  *
  * Tout appareil qui connaît le même « code de synchro » partage la même sauvegarde.
- * Le serveur ne stocke qu'une empreinte (SHA-256) du code et n'est accessible que par
- * deux fonctions : leonida_load(code) et leonida_save(code, données, version).
+ * Le serveur ne voit qu'une empreinte (SHA-256) du code, qui sert de nom au document.
  *
  * Partagé entre appareils : points, catégories, corrections de routes.
  * Propre à chaque appareil : vue de la carte, catégories masquées, réglages d'affichage.
@@ -19,9 +18,9 @@
   const PUSH_DELAY = 1500;
 
   const cfg = global.LEONIDA_CONFIG || {};
-  const enabled = !!(cfg.supabaseUrl && cfg.supabaseKey);
+  const enabled = !!(cfg.firebaseProjectId && cfg.firebaseApiKey);
 
-  let meta = { key: "", version: 0, dirty: false, hash: "" };
+  let meta = { key: "", version: "", dirty: false, hash: "" };
   try { meta = { ...meta, ...JSON.parse(localStorage.getItem(META_KEY) || "{}") }; } catch (e) { /* ignoré */ }
   const storeMeta = () => { try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch (e) { /* ignoré */ } };
 
@@ -36,15 +35,53 @@
     hooks?.onStatus?.(s, detail);
   }
 
-  // --- Appels au serveur -----------------------------------------------------
-  async function rpc(name, body) {
-    const headers = { "Content-Type": "application/json", apikey: cfg.supabaseKey };
-    if (!cfg.supabaseKey.startsWith("sb_")) headers.Authorization = "Bearer " + cfg.supabaseKey;
-    const r = await fetch(cfg.supabaseUrl.replace(/\/$/, "") + "/rest/v1/rpc/" + name, {
-      method: "POST", headers, body: JSON.stringify(body),
+  // --- Appels au serveur (Firestore, API REST) --------------------------------
+  // Une sauvegarde = un document leonida_saves/{SHA-256 du code}, avec un seul champ « json ».
+  // Le code lui-même ne quitte jamais l'appareil ; les règles Firestore interdisent de lister
+  // la collection, donc il faut connaître le code pour retrouver le document.
+  // « version » = updateTime du document, utilisé comme verrou optimiste.
+  const DOCS = enabled
+    ? `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(cfg.firebaseProjectId)}/databases/(default)/documents/leonida_saves/`
+    : "";
+  const docIds = new Map();
+  async function docId(key) {
+    if (!docIds.has(key)) {
+      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key));
+      docIds.set(key, [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join(""));
+    }
+    return docIds.get(key);
+  }
+
+  async function request(method, key, query, body) {
+    const params = new URLSearchParams({ key: cfg.firebaseApiKey, ...query });
+    const r = await fetch(DOCS + (await docId(key)) + "?" + params, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
     });
-    if (!r.ok) throw new Error(`${r.status} ${await r.text().catch(() => "")}`.trim());
-    return r.json();
+    const json = await r.json().catch(() => ({}));
+    return { r, json };
+  }
+
+  /** {version, data} ou null si ce code n'a encore rien enregistré. */
+  async function load(key) {
+    const { r, json } = await request("GET", key, {});
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error(`${r.status} ${json.error?.message || ""}`.trim());
+    return { version: json.updateTime, data: JSON.parse(json.fields?.json?.stringValue || "{}") };
+  }
+
+  /** Enregistre si la version distante est toujours « version » ; sinon renvoie la version actuelle. */
+  async function save(key, data, version) {
+    const precondition = version ? { "currentDocument.updateTime": version } : { "currentDocument.exists": "false" };
+    const { r, json } = await request("PATCH", key, precondition, { fields: { json: { stringValue: JSON.stringify(data) } } });
+    if (r.ok) return { ok: true, version: json.updateTime };
+    const st = json.error?.status;
+    if (st === "FAILED_PRECONDITION" || st === "ALREADY_EXISTS" || st === "NOT_FOUND" || r.status === 409) {
+      const cur = await load(key);
+      return { ok: false, version: cur?.version || "", data: cur?.data || {} };
+    }
+    throw new Error(`${r.status} ${json.error?.message || ""}`.trim());
   }
 
   // --- Document partagé ------------------------------------------------------
@@ -152,7 +189,7 @@
     try {
       let state = hooks.getState();
       let doc = sharedDoc(state);
-      let res = await rpc("leonida_save", { p_key: meta.key, p_data: doc, p_version: meta.version });
+      let res = await save(meta.key, doc, meta.version);
       if (!res.ok) {
         // Un autre appareil a enregistré entre-temps : on fusionne et on réessaie.
         const merged = merge(doc, res.data || {});
@@ -160,7 +197,7 @@
         state = hooks.getState();
         takeSnapshot(state);
         doc = sharedDoc(state);
-        res = await rpc("leonida_save", { p_key: meta.key, p_data: doc, p_version: res.version });
+        res = await save(meta.key, doc, res.version);
         if (!res.ok) throw new Error("conflit répété");
       }
       meta.version = res.version;
@@ -184,11 +221,11 @@
     busy = true;
     setStatus("loading");
     try {
-      const res = await rpc("leonida_load", { p_key: meta.key });
+      const res = await load(meta.key);
       const state = hooks.getState();
       if (!res) {
         // Code tout neuf : on envoie ce qu'on a.
-        meta.version = 0;
+        meta.version = "";
         meta.dirty = true;
       } else if (res.version !== meta.version || meta.dirty) {
         const remote = res.data || {};
@@ -220,14 +257,14 @@
   const normalizeCode = (c) => (c || "").toUpperCase().replace(/[^A-Z0-9]/g, "").match(/.{1,5}/g)?.join("-") || "";
 
   function setCode(code) {
-    meta = { key: normalizeCode(code), version: 0, dirty: true, hash: "" };
+    meta = { key: normalizeCode(code), version: "", dirty: true, hash: "" };
     storeMeta();
     return pull();
   }
 
   function disable() {
     clearTimeout(timer);
-    meta = { key: "", version: 0, dirty: false, hash: "" };
+    meta = { key: "", version: "", dirty: false, hash: "" };
     storeMeta();
     setStatus("off");
   }
@@ -240,7 +277,7 @@
     if (m) {
       history.replaceState(null, "", location.pathname + location.search);
       if (enabled && normalizeCode(m[1]).length >= 20) {
-        meta = { key: normalizeCode(m[1]), version: 0, dirty: true, hash: "" };
+        meta = { key: normalizeCode(m[1]), version: "", dirty: true, hash: "" };
         storeMeta();
         hooks.onLinked?.();
       }

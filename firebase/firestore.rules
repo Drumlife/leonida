@@ -1,0 +1,22 @@
+rules_version = '2';
+
+// Leonida Tracker : synchronisation sans compte.
+// Chaque sauvegarde est un document leonida_saves/{SHA-256 du code de synchro}.
+// On peut lire ou écrire un document seulement si on connaît son nom ;
+// lister la collection ou supprimer est interdit.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /leonida_saves/{id} {
+      allow get: if id.matches('^[0-9a-f]{64}$');
+      allow create, update: if id.matches('^[0-9a-f]{64}$')
+        && request.resource.data.keys().hasOnly(['json'])
+        && request.resource.data.json is string
+        && request.resource.data.json.size() < 1000000;
+      allow list, delete: if false;
+    }
+    // Tout le reste est fermé.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

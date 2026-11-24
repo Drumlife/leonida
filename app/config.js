@@ -1,10 +1,11 @@
 /*
- * Configuration de la synchronisation (Supabase).
- * La clé « publishable » (ou « anon ») est faite pour être publique : elle ne donne accès
- * qu'aux deux fonctions leonida_load / leonida_save, qui exigent ton code de synchro.
+ * Configuration de la synchronisation (Firebase / Firestore).
+ * La clé d'API web de Firebase est faite pour être publique : ce sont les règles
+ * (firebase/firestore.rules) qui protègent les données, et il faut ton code de synchro
+ * pour retrouver ta sauvegarde.
  * Laisse vide pour désactiver la synchronisation.
  */
 window.LEONIDA_CONFIG = {
-  supabaseUrl: "",
-  supabaseKey: "",
+  firebaseProjectId: "leonida-81c6f",
+  firebaseApiKey: "AIzaSyBusq5dloxdanFiTsomnUQK2xH0P-uH860",
 };
