@@ -177,6 +177,30 @@
     return e;
   }
 
+  /**
+   * Petite fenêtre dans la page, à la place de confirm()/prompt() (bloqués par certains
+   * navigateurs intégrés). Résout avec true / le texte saisi / la valeur d'un bouton, ou null.
+   */
+  function ask(message, { input = null, ok = "OK", cancel = "Annuler", choices = [], extra = null } = {}) {
+    return new Promise((resolve) => {
+      const d = el("dialog", { class: "ask" });
+      const field = input !== null ? el("input", { type: "text", value: input, spellcheck: "false" }) : null;
+      const done = (v) => { d.close(); d.remove(); resolve(v); };
+      const row = el("div", { class: "btn-row" });
+      if (cancel) row.append(el("button", { class: "btn", type: "button", onclick: () => done(null) }, cancel));
+      for (const c of choices) row.append(el("button", { class: "btn", type: "button", onclick: () => done(c.value) }, c.label));
+      const okBtn = el("button", { class: "btn primary", type: "button", onclick: () => done(field ? field.value : true) }, ok);
+      row.append(okBtn);
+      d.append(el("p", {}, message), ...(extra ? [extra] : []), ...(field ? [field] : []), row);
+      d.addEventListener("cancel", (e) => { e.preventDefault(); done(null); });
+      field?.addEventListener("keydown", (e) => { if (e.key === "Enter") done(field.value); });
+      document.body.append(d);
+      d.showModal();
+      if (field) { field.focus(); field.select(); } else okBtn.focus();
+    });
+  }
+  const showText = (message, text) => ask(message, { input: text, ok: "Fermer", cancel: null });
+
   function popupView(p) {
     const cat = catById(p.cat);
     const box = el("div", { class: "popup" },
@@ -271,8 +295,8 @@
     if (routeIds.has(p.id)) redrawRoute();
   }
 
-  function removePoint(p) {
-    if (!confirm(`Supprimer « ${p.name || "Sans nom"} » ?`)) return;
+  async function removePoint(p) {
+    if (!(await ask(`Supprimer « ${p.name || "Sans nom"} » ?`, { ok: "Supprimer" }))) return;
     state.points = state.points.filter((q) => q.id !== p.id);
     save();
     map.closePopup();
@@ -286,7 +310,7 @@
     url.searchParams.set("point", p.id);
     navigator.clipboard?.writeText(url.toString()).then(
       () => toast("Lien copié."),
-      () => prompt("Copie ce lien :", url.toString()),
+      () => showText("Copie ce lien :", url.toString()),
     );
   }
 
@@ -383,8 +407,8 @@
     save();
     renderPoints();
   });
-  document.getElementById("add-category").addEventListener("click", () => {
-    const name = prompt("Nom de la nouvelle catégorie :");
+  document.getElementById("add-category").addEventListener("click", async () => {
+    const name = await ask("Nom de la nouvelle catégorie :", { input: "", ok: "Créer" });
     if (!name || !name.trim()) return;
     const hue = Math.floor(Math.random() * 360);
     state.categories.push({ id: uid("c"), name: name.trim(), group: "custom", color: hslToHex(hue, 75, 55) });
@@ -661,9 +685,9 @@
     rebuildRoads();
     toast("Dernière correction annulée.");
   });
-  document.getElementById("road-reset").addEventListener("click", () => {
+  document.getElementById("road-reset").addEventListener("click", async () => {
     const n = state.roadEdits.length;
-    if (!n || !confirm(`Effacer les ${n} corrections de routes et revenir au réseau d'origine ?`)) return;
+    if (!n || !(await ask(`Effacer les ${n} corrections de routes et revenir au réseau d'origine ?`, { ok: "Effacer" }))) return;
     state.roadEdits = [];
     save();
     rebuildRoads();
@@ -998,11 +1022,13 @@
     try {
       const data = JSON.parse(await file.text());
       if (!Array.isArray(data.points) || !Array.isArray(data.categories)) throw new Error("format");
-      const replace = confirm(
+      const mode = await ask(
         `Fichier : ${data.points.length} points, ${data.categories.length} catégories.\n\n` +
-        "OK = remplacer tes données actuelles\nAnnuler = fusionner avec tes données actuelles",
+        "Fusionner avec tes données actuelles, ou les remplacer ?",
+        { ok: "Fusionner", choices: [{ label: "Remplacer", value: "replace" }] },
       );
-      if (replace) {
+      if (!mode) return;
+      if (mode === "replace") {
         state.categories = data.categories;
         state.points = data.points;
         state.roadEdits = Array.isArray(data.roadEdits) ? data.roadEdits : [];
@@ -1107,13 +1133,13 @@
     if (!Sync.code) {
       syncHint.textContent = "Active la synchro sur un premier appareil, puis ouvre le lien obtenu sur les autres (ton cell, par exemple).";
       syncActions.append(
-        el("button", { class: "btn primary", onclick: () => {
-          if (!confirm("Créer un nouveau code de synchro et y envoyer les points de cet appareil ?")) return;
+        el("button", { class: "btn primary", onclick: async () => {
+          if (!(await ask("Créer un nouveau code de synchro et y envoyer les points de cet appareil ?", { ok: "Activer" }))) return;
           Sync.setCode(Sync.newCode()).then(renderSync);
           renderSync();
         } }, "Activer"),
-        el("button", { class: "btn", onclick: () => {
-          const code = prompt("Colle ton code de synchro (ex. ABCDE-FGHJK-LMNPQ-RSTUV) :");
+        el("button", { class: "btn", onclick: async () => {
+          const code = await ask("Colle ton code de synchro (ex. ABCDE-FGHJK-LMNPQ-RSTUV) :", { input: "", ok: "Relier" });
           if (!code) return;
           if (Sync.normalizeCode(code).replace(/-/g, "").length < 20) { toast("Code invalide."); return; }
           Sync.setCode(code).then(() => { toast("Appareil relié à ta sauvegarde."); renderSync(); });
@@ -1123,21 +1149,39 @@
       return;
     }
     syncHint.textContent = "Ton code de synchro donne accès à tes points : ne le partage pas.";
-    const link = location.origin + location.pathname + "#sync=" + Sync.code;
+    // Depuis localhost, le lien pointe vers le site publié (le seul joignable depuis le cell).
+    const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+    const base = local && window.LEONIDA_CONFIG?.publicUrl ? window.LEONIDA_CONFIG.publicUrl : location.origin + location.pathname;
+    const link = base + "#sync=" + Sync.code;
     syncActions.append(
-      el("button", { class: "btn", onclick: () => {
-        navigator.clipboard?.writeText(link).then(
-          () => toast("Lien copié : ouvre-le sur ton cell pour le relier."),
-          () => prompt("Copie ce lien et ouvre-le sur l'autre appareil :", link),
-        );
-      } }, "Lien pour un autre appareil"),
-      el("button", { class: "btn", onclick: () => prompt("Ton code de synchro :", Sync.code) }, "Voir le code"),
-      el("button", { class: "link-btn", onclick: () => {
-        if (!confirm("Arrêter la synchro sur cet appareil ? Tes points restent ici et en ligne.")) return;
+      el("button", { class: "btn", onclick: () => showPairing(link) }, "Lien pour un autre appareil"),
+      el("button", { class: "btn", onclick: () => showText("Ton code de synchro :", Sync.code) }, "Voir le code"),
+      el("button", { class: "link-btn", onclick: async () => {
+        if (!(await ask("Arrêter la synchro sur cet appareil ? Tes points restent ici et en ligne.", { ok: "Désactiver" }))) return;
         Sync.disable();
         renderSync();
       } }, "Désactiver ici"),
     );
+  }
+
+  let qrLib = null;
+  const loadQr = () => (qrLib ||= new Promise((ok, fail) => {
+    const sc = el("script", { src: "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" });
+    sc.onload = () => ok(window.QRCode);
+    sc.onerror = () => { qrLib = null; fail(); };
+    document.head.append(sc);
+  }));
+
+  /** Code QR + lien à copier, pour relier un autre appareil (ton cell). */
+  async function showPairing(link) {
+    const box = el("div", { class: "qr" });
+    try {
+      const QR = await loadQr();
+      new QR(box, { text: link, width: 220, height: 220, correctLevel: QR.CorrectLevel.M });
+    } catch (e) { box.remove(); }
+    navigator.clipboard?.writeText(link).catch(() => {});
+    ask("Scanne ce code avec ton cell (ou ouvre le lien, déjà copié) pour le relier à ta sauvegarde. Ne le partage pas : il donne accès à tes points.",
+      { input: link, ok: "Fermer", cancel: null, extra: box });
   }
 
   if (Sync) {

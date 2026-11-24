@@ -452,3 +452,13 @@ textarea { resize: vertical; min-height: 54px; }
 .sync-dot.err { background: #ef4444; }
 .sync-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .sync-actions .btn { width: auto; flex: 1 1 auto; }
+
+/* Fenêtre de confirmation / saisie intégrée */
+dialog.ask { background: var(--panel, #1b1f27); color: inherit; border: 1px solid rgba(255,255,255,.15); border-radius: 12px; padding: 16px; width: min(420px, calc(100vw - 32px)); box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+dialog.ask::backdrop { background: rgba(0,0,0,.55); }
+dialog.ask p { margin: 0 0 12px; white-space: pre-line; line-height: 1.4; }
+dialog.ask input { width: 100%; box-sizing: border-box; margin-bottom: 12px; font-family: ui-monospace, monospace; }
+dialog.ask .btn-row { justify-content: flex-end; }
+dialog.ask .btn { width: auto; }
+dialog.ask .qr { display: flex; justify-content: center; margin: 0 auto 12px; padding: 10px; background: #fff; border-radius: 8px; width: fit-content; }
+dialog.ask .qr img, dialog.ask .qr canvas { display: block; }

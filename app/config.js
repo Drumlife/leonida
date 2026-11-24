@@ -8,4 +8,6 @@
 window.LEONIDA_CONFIG = {
   firebaseProjectId: "leonida-81c6f",
   firebaseApiKey: "AIzaSyBusq5dloxdanFiTsomnUQK2xH0P-uH860",
+  // Adresse du site publié, utilisée pour le lien « autre appareil » depuis localhost.
+  publicUrl: "https://drumlife.github.io/leonida/app/",
 };
