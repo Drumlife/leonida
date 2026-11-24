@@ -25,3 +25,4 @@ __pycache__/
 !/vendor/gtadb/map/data/
 /vendor/gtadb/maps/*
 !/vendor/gtadb/maps/tiles/
+!/.nojekyll
