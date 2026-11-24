@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Leonida Tracker</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <aside id="sidebar">
+    <header class="brand">
+      <h1>Leonida Tracker</h1>
+      <button id="toggle-sidebar" class="icon-btn" title="Masquer le panneau" aria-label="Masquer le panneau">‹</button>
+    </header>
+
+    <section class="panel">
+      <div class="progress">
+        <div class="progress-label"><span id="progress-text">0 / 0 trouvés</span><span id="progress-pct">0 %</span></div>
+        <div class="progress-bar"><div id="progress-fill"></div></div>
+      </div>
+      <input id="search" type="search" placeholder="Rechercher un point ou un lieu…" autocomplete="off">
+      <ul id="search-results" class="search-results" hidden></ul>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Catégories</h2>
+        <div class="row-actions">
+          <button id="cat-all" class="link-btn">Tout</button>
+          <button id="cat-none" class="link-btn">Rien</button>
+        </div>
+      </div>
+      <ul id="categories" class="categories"></ul>
+      <button id="add-category" class="link-btn">+ Nouvelle catégorie</button>
+      <label class="check"><input type="checkbox" id="hide-found"> Masquer les points trouvés</label>
+      <label class="check"><input type="checkbox" id="show-landmarks"> Afficher les repères gtadb (<span id="landmark-count">0</span>)</label>
+    </section>
+
+    <section class="panel">
+      <h2>Points</h2>
+      <button id="add-point" class="btn primary">+ Ajouter un point</button>
+      <p class="hint" id="add-hint" hidden>Clique sur la carte pour placer le point. <kbd>Échap</kbd> pour annuler.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Itinéraire</h2>
+      <p class="hint">Passe par tous les points visibles non trouvés, dans l'ordre le plus court par la route.</p>
+      <div class="btn-row">
+        <button id="set-start" class="btn">Choisir le départ</button>
+        <button id="route" class="btn primary">Calculer</button>
+      </div>
+      <button id="clear-route" class="link-btn" hidden>Effacer l'itinéraire</button>
+      <div id="route-info" class="route-info" hidden></div>
+    </section>
+
+    <section class="panel">
+      <h2>Routes</h2>
+      <label class="check"><input type="checkbox" id="show-roads"> Afficher le réseau routier (<span id="road-count">…</span>)</label>
+      <button id="road-edit" class="btn">Modifier les routes</button>
+      <div id="road-tools" class="road-tools" hidden>
+        <div class="btn-row">
+          <button id="road-draw" class="btn">Tracer</button>
+          <button id="road-delete" class="btn">Supprimer</button>
+        </div>
+        <p class="hint" id="road-hint"></p>
+        <label class="check"><input type="checkbox" id="show-deadends" checked> Montrer les impasses (<span id="deadend-count">0</span>)</label>
+        <div class="btn-row">
+          <button id="road-undo" class="btn">Annuler</button>
+          <button id="road-reset" class="btn danger">Tout réinitialiser</button>
+        </div>
+        <p class="hint" id="road-edit-count"></p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Sauvegarde</h2>
+      <div class="btn-row">
+        <button id="export" class="btn">Exporter</button>
+        <button id="import" class="btn">Importer</button>
+        <input id="import-file" type="file" accept="application/json" hidden>
+      </div>
+      <div class="sync-box">
+        <h3>Synchronisation</h3>
+        <div class="sync-status"><span id="sync-dot" class="sync-dot off"></span><span id="sync-text"></span></div>
+        <div id="sync-actions" class="sync-actions"></div>
+        <p class="hint" id="sync-hint"></p>
+      </div>
+    </section>
+
+    <footer class="credits">
+      Tuiles et repères : <a href="https://map.gtadb.org" target="_blank" rel="noopener">gtadb.org</a> et contributeurs,
+      <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>.
+      GTA VI © Rockstar Games. Outil personnel non officiel.
+    </footer>
+  </aside>
+
+  <button id="show-sidebar" class="icon-btn floating" title="Afficher le panneau" aria-label="Afficher le panneau" hidden>›</button>
+  <main id="map"></main>
+  <div id="cursor-pos" class="cursor-pos"></div>
+  <div id="toast" class="toast" hidden></div>
+  <div id="clone-bar" class="clone-bar" hidden></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="config.js"></script>
+  <script src="sync.js"></script>
+  <script src="data/material-icons.js"></script>
+  <script src="icons.js"></script>
+  <script src="route.js"></script>
+  <script src="roadnet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

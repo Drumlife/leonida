@@ -1,0 +1,27 @@
+# Liste blanche : seul ce qui sert à l'app publiée est versionné.
+/*
+!/.gitignore
+!/index.html
+!/README.md
+!/CREDITS.md
+!/app/
+!/tools/
+!/supabase/
+!/vendor/
+
+/tools/cache/
+__pycache__/
+
+/vendor/*
+!/vendor/material-symbols/
+!/vendor/fontawesome/
+!/vendor/gtadb/
+/vendor/gtadb/*
+!/vendor/gtadb/LICENSE
+!/vendor/gtadb/LICENSE-DATA
+!/vendor/gtadb/maps/
+!/vendor/gtadb/map/
+/vendor/gtadb/map/*
+!/vendor/gtadb/map/data/
+/vendor/gtadb/maps/*
+!/vendor/gtadb/maps/tiles/
