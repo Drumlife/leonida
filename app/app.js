@@ -959,23 +959,32 @@
       return;
     }
     const { start, order } = lastRoute;
-    const remaining = order.filter((p) => !p.found && state.points.includes(p));
+    // L'itinéraire est une suite d'étapes fixes : départ → 1 → 2 → …
+    // Une étape disparaît quand son point d'arrivée est coché (on y est arrivé) ;
+    // l'étape qui en repart reste affichée jusqu'à ce que le point suivant soit coché.
+    const byId = new Map(state.points.map((p) => [p.id, p]));
+    const stops = order.map((o) => byId.get(o.id)).filter(Boolean); // points supprimés ignorés
+    const remaining = [];
+    const legs = [];
+    let prev = start;
+    for (const p of stops) {
+      if (!p.found) {
+        remaining.push(p);
+        legs.push(legPath(prev, p));
+      }
+      prev = p;
+    }
     let len = 0;
     let allRoad = true;
-    const line = [];
-    let prev = start;
-    remaining.forEach((p, i) => {
-      const leg = legPath(prev, p);
+    legs.forEach((leg, i) => {
       len += leg.length;
       allRoad = allRoad && leg.road;
       const pts = leg.coords.map(([x, y]) => L.latLng(y, x));
-      line.push(...(i ? pts.slice(1) : pts));
       // L'étape suivante en surbrillance, le reste plus discret.
       if (i === 0) L.polyline(pts, { color: "#22c55e", weight: 9, opacity: 0.35 }).addTo(routeLayer);
-      prev = p;
+      L.polyline(pts, { color: "#000", weight: 7, opacity: 0.35 }).addTo(routeLayer);
+      L.polyline(pts, { color: "#ffd23f", weight: 4, opacity: 0.95 }).addTo(routeLayer);
     });
-    L.polyline(line, { color: "#000", weight: 7, opacity: 0.35 }).addTo(routeLayer);
-    L.polyline(line, { color: "#ffd23f", weight: 4, opacity: 0.95 }).addTo(routeLayer);
     remaining.forEach((p, i) => {
       routeIds.add(p.id);
       L.marker(toLatLng(p), {
@@ -1195,5 +1204,5 @@
   renderSync();
 
   // Accès pour le débogage dans la console.
-  window.leonida = { map, state, CRS, get roads() { return roads; } };
+  window.leonida = { map, state, CRS, get roads() { return roads; }, redrawRoute };
 })();
