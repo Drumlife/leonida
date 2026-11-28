@@ -338,6 +338,27 @@
     return `<span class="swatch" style="background:${c.color};width:${size * 0.6}px;height:${size * 0.6}px;margin:${size * 0.2}px"></span>`;
   }
 
+  /** Compteur « trouvés / total » ; cliquable pour décocher tous les points trouvés. */
+  function countEl(pts, label) {
+    const found = pts.filter((p) => p.found);
+    const text = `${found.length}/${pts.length}`;
+    if (!found.length) return el("span", { class: "count" }, text);
+    return el("button", {
+      class: "count count-btn",
+      type: "button",
+      title: "Décocher tous les points trouvés",
+      onclick: async (e) => {
+        e.stopPropagation();
+        const n = found.length;
+        if (!(await ask(`Décocher ${n === 1 ? "le point trouvé" : `les ${n} points trouvés`} de « ${label} » ?`, { ok: "Décocher" }))) return;
+        for (const p of found) p.found = false;
+        save();
+        if (lastRoute) redrawRoute(); else renderPoints();
+        toast(n === 1 ? "1 point décoché." : `${n} points décochés.`);
+      },
+    }, text);
+  }
+
   /** Catégories regroupées et repliables ; une case par groupe pour tout cocher ou décocher. */
   function renderCategories() {
     catList.replaceChildren();
@@ -346,7 +367,6 @@
       const cats = state.categories.filter((c) => c.group === g.id);
       if (!cats.length) continue;
       const pts = state.points.filter((p) => cats.some((c) => c.id === p.cat));
-      const found = pts.filter((p) => p.found).length;
       const visible = cats.filter((c) => !state.hidden[c.id]).length;
 
       const gcb = el("input", { type: "checkbox", title: "Tout afficher / masquer" });
@@ -364,7 +384,7 @@
           class: "group-toggle",
           onclick: () => { collapsed[g.id] = isOpen; save(); renderCategories(); },
         }, el("span", { class: "caret" }, "▸"), el("span", { class: "dot", style: `background:${g.color}` }), el("span", { class: "name" }, g.name)),
-        el("span", { class: "count" }, `${found}/${pts.length}`),
+        countEl(pts, g.name),
       );
       const li = el("li", { class: "group" }, head);
       if (isOpen) {
@@ -384,7 +404,7 @@
           badge.innerHTML = catBadge(c, 22);
           ul.append(el("li", {},
             el("label", { title: c.game ? `${c.name} (${c.game})` : c.name }, cb, badge, el("span", { class: "name" }, c.name)),
-            el("span", { class: "count" }, `${cpts.filter((p) => p.found).length}/${cpts.length}`),
+            countEl(cpts, c.name),
             color,
           ));
         }

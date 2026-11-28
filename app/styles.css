@@ -463,3 +463,5 @@ dialog.ask .btn { width: auto; }
 dialog.ask .qr { display: flex; justify-content: center; margin: 0 auto 12px; padding: 10px; background: #fff; border-radius: 8px; width: fit-content; }
 dialog.ask .qr img, dialog.ask .qr canvas { display: block; }
 .popup .meta.shared { color: #38bdf8; margin-top: 4px; }
+.count-btn { background: none; border: 0; padding: 0 2px; font: inherit; color: inherit; cursor: pointer; border-radius: 4px; }
+.count-btn:hover, .count-btn:focus-visible { color: #fff; text-decoration: underline; background: rgba(255,255,255,.08); }
