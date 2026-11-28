@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Leonida Tracker</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="styles.css?v=5">
+  <link rel="stylesheet" href="styles.css?v=6">
 </head>
 <body>
   <aside id="sidebar">
@@ -87,6 +87,11 @@
         <div id="sync-actions" class="sync-actions"></div>
         <p class="hint" id="sync-hint"></p>
       </div>
+      <div class="sync-box">
+        <h3>Carte partagée</h3>
+        <p class="hint" id="share-status"></p>
+        <div id="share-actions" class="sync-actions"></div>
+      </div>
     </section>
 
     <footer class="credits">
@@ -103,12 +108,13 @@
   <div id="clone-bar" class="clone-bar" hidden></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-  <script src="config.js?v=5"></script>
-  <script src="sync.js?v=5"></script>
-  <script src="data/material-icons.js?v=5"></script>
-  <script src="icons.js?v=5"></script>
-  <script src="route.js?v=5"></script>
-  <script src="roadnet.js?v=5"></script>
-  <script src="app.js?v=5"></script>
+  <script src="config.js?v=6"></script>
+  <script src="sync.js?v=6"></script>
+  <script src="share.js?v=6"></script>
+  <script src="data/material-icons.js?v=6"></script>
+  <script src="icons.js?v=6"></script>
+  <script src="route.js?v=6"></script>
+  <script src="roadnet.js?v=6"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>

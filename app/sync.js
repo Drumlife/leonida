@@ -93,6 +93,8 @@
       roadEdits: state.roadEdits || [],
       roadEditsAt: state.roadEditsAt || 0,
       deleted: state.deleted || {},
+      share: state.share || null,   // ma carte partagée : { salt, at }
+      follow: state.follow || null, // carte que je suis : { sid, name, at }
     };
   }
 
@@ -126,12 +128,15 @@
     for (const c of local.categories || []) cats.set(c.id, c);
 
     const localRoadsNewer = (local.roadEditsAt || 0) >= (remote.roadEditsAt || 0);
+    const newer = (a, b) => ((a?.at || 0) >= (b?.at || 0) ? a : b) || null;
     return {
       points,
       categories: [...cats.values()],
       roadEdits: localRoadsNewer ? local.roadEdits : remote.roadEdits || [],
       roadEditsAt: Math.max(local.roadEditsAt || 0, remote.roadEditsAt || 0),
       deleted,
+      share: newer(local.share, remote.share),
+      follow: newer(local.follow, remote.follow),
     };
   }
 

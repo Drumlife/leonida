@@ -75,6 +75,7 @@
     window.LeonidaSync?.noteChange(state);
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
     catch (e) { toast("Impossible de sauvegarder dans ce navigateur."); }
+    scheduleSharePublish();
   }
 
   const uid = (p) => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -193,7 +194,7 @@
       row.append(okBtn);
       d.append(el("p", {}, message), ...(extra ? [extra] : []), ...(field ? [field] : []), row);
       d.addEventListener("cancel", (e) => { e.preventDefault(); done(null); });
-      field?.addEventListener("keydown", (e) => { if (e.key === "Enter") done(field.value); });
+      field?.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); done(field.value); } });
       document.body.append(d);
       d.showModal();
       if (field) { field.focus(); field.select(); } else okBtn.focus();
@@ -208,13 +209,14 @@
       el("div", { class: "meta" }, `${cat.name} · x ${Math.round(p.x)}, y ${Math.round(p.y)}`),
     );
     if (p.note) box.append(el("div", { class: "note" }, p.note));
+    if (p.src) box.append(el("div", { class: "meta shared" }, `Carte partagée${state.follow?.name ? " de " + state.follow.name : ""} : seuls tes crochets sont à toi.`));
     box.append(el("div", { class: "actions" },
       el("button", { class: "btn primary", onclick: () => toggleFound(p) }, p.found ? "Non trouvé" : "Trouvé ✓"),
-      el("button", { class: "btn", onclick: () => openEditor(p) }, "Modifier"),
+      p.src ? "" : el("button", { class: "btn", onclick: () => openEditor(p) }, "Modifier"),
       el("button", { class: "btn", onclick: () => copyLink(p) }, "Copier le lien"),
       el("button", { class: "btn", onclick: () => { setStart(toLatLng(p)); map.closePopup(); } }, "Départ d'ici"),
       el("button", { class: "btn", onclick: () => { map.closePopup(); startCloning(p); } }, "Placer des copies"),
-      el("button", { class: "btn danger", onclick: () => removePoint(p) }, "Supprimer"),
+      p.src ? "" : el("button", { class: "btn danger", onclick: () => removePoint(p) }, "Supprimer"),
     ));
     return box;
   }
@@ -1107,6 +1109,9 @@
     state.roadEdits = doc.roadEdits || [];
     state.roadEditsAt = doc.roadEditsAt || 0;
     state.deleted = doc.deleted || {};
+    const followChanged = (doc.follow?.sid || null) !== (state.follow?.sid || null);
+    state.share = doc.share || null;
+    state.follow = doc.follow || null;
     migrateCategories(state);
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* ignoré */ }
     if (lastRoute) {
@@ -1116,6 +1121,8 @@
     if (roadsChanged) rebuildRoads();
     if (lastRoute) redrawRoute();
     else renderPoints();
+    renderShare();
+    if (followChanged) refreshFollow();
   }
 
   const SYNC_LABELS = {
@@ -1193,15 +1200,246 @@
       { input: link, ok: "Fermer", cancel: null, extra: box });
   }
 
+  // ---------------------------------------------------------------------------
+  // Carte partagée en lecture seule
+  //  - Propriétaire : « Partager ma carte » publie ses points (sans crochets) ; le lien
+  //    « #map=… » permet à un ami de la suivre. Mis à jour automatiquement.
+  //  - Ami : les points de la carte suivie sont ajoutés aux siens (marqués p.src) ;
+  //    il ne peut pas les modifier, mais ses crochets sont à lui.
+  // ---------------------------------------------------------------------------
+  const Share = window.LeonidaShare;
+  const shareStatus = document.getElementById("share-status");
+  const shareActions = document.getElementById("share-actions");
+  const SHARE_HASH_KEY = "leonida.shareHash";
+  let shareInfo = "";   // message d'état côté ami
+  let shareError = "";  // dernière erreur de publication
+
+  const publicBase = () => {
+    const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+    return local && window.LEONIDA_CONFIG?.publicUrl ? window.LEONIDA_CONFIG.publicUrl : location.origin + location.pathname;
+  };
+
+  async function myShareIds() {
+    if (!Share?.enabled || !Sync?.code || !state.share?.salt) return null;
+    return Share.ids(Sync.code, state.share.salt);
+  }
+
+  /** Contenu publié : mes propres points (pas ceux d'une carte suivie), sans les crochets. */
+  function sharePayload() {
+    const points = state.points.filter((p) => !p.src)
+      .map(({ id, x, y, name, cat, note }) => ({ id, x, y, name: name || "", cat, note: note || "" }));
+    const used = new Set(points.map((p) => p.cat));
+    const categories = state.categories.filter((c) => used.has(c.id));
+    return { v: 1, name: state.share?.name || "", points, categories };
+  }
+
+  // Déclaration de fonction (hissée) : save() peut l'appeler avant l'initialisation de ce bloc,
+  // donc elle n'utilise que des globales.
+  function scheduleSharePublish(delay = 3000) {
+    if (!state.share?.salt || !window.LeonidaSync?.code) return;
+    clearTimeout(scheduleSharePublish.timer);
+    scheduleSharePublish.timer = setTimeout(() => publishShare(), delay);
+  }
+
+  async function publishShare(force = false) {
+    const id = await myShareIds();
+    if (!id) return;
+    const payload = sharePayload();
+    const hash = id.sid + ":" + (await Share.sha256hex(JSON.stringify(payload)));
+    let last = "";
+    try { last = localStorage.getItem(SHARE_HASH_KEY) || ""; } catch (e) { /* ignoré */ }
+    if (!force && last === hash) return;
+    try {
+      await Share.publish(id.sid, id.w, { ...payload, at: Date.now() });
+      try { localStorage.setItem(SHARE_HASH_KEY, hash); } catch (e) { /* ignoré */ }
+      shareError = "";
+    } catch (e) {
+      shareError = String(e.message || e);
+      scheduleSharePublish(30000);
+    }
+    renderShare();
+  }
+
+  async function startSharing() {
+    if (!Sync?.code) { toast("Active d'abord la synchronisation : le partage en dépend."); return; }
+    const name = await ask("Ton nom ou surnom, affiché à ton ami (facultatif) :", { input: state.share?.name || "", ok: "Partager" });
+    if (name === null) return;
+    state.share = { salt: Share.randomHex(16), name: name.trim().slice(0, 40), at: Date.now() };
+    save();
+    await publishShare(true);
+    if (!shareError) showShareLink();
+  }
+
+  async function stopSharing() {
+    const ok = await ask("Arrêter le partage ? Ton ami gardera les points déjà reçus, mais ne recevra plus tes ajouts. Un nouveau partage donnera un nouveau lien.", { ok: "Arrêter" });
+    if (!ok) return;
+    const id = await myShareIds();
+    if (id) {
+      try { await Share.publish(id.sid, id.w, { v: 1, stopped: true, points: [], categories: [], at: Date.now() }); }
+      catch (e) { toast("Impossible de prévenir la carte partagée : réessaie plus tard."); return; }
+    }
+    state.share = { salt: null, at: Date.now() };
+    try { localStorage.removeItem(SHARE_HASH_KEY); } catch (e) { /* ignoré */ }
+    save();
+    renderShare();
+    toast("Partage arrêté.");
+  }
+
+  async function showShareLink() {
+    const id = await myShareIds();
+    if (!id) return;
+    const link = publicBase() + "#map=" + id.sid;
+    const box = el("div", { class: "qr" });
+    try {
+      const QR = await loadQr();
+      new QR(box, { text: link, width: 220, height: 220, correctLevel: QR.CorrectLevel.M });
+    } catch (e) { box.remove(); }
+    navigator.clipboard?.writeText(link).catch(() => {});
+    ask("Envoie ce lien à ton ami (déjà copié). Il verra tes points et tes ajouts futurs, avec ses propres crochets. Il ne peut rien modifier sur ta carte.",
+      { input: link, ok: "Fermer", cancel: null, extra: box });
+  }
+
+  /** Ajoute / met à jour / retire les points de la carte suivie, sans toucher aux crochets. */
+  function applyShare(sid, doc) {
+    let changed = false;
+    const have = new Set(state.categories.map((c) => c.id));
+    for (const c of doc.categories || []) {
+      if (c && c.id && !have.has(c.id)) { state.categories.push({ ...c }); have.add(c.id); changed = true; }
+    }
+    const incoming = new Map((doc.points || []).filter((p) => p && p.id).map((p) => [p.id, p]));
+    const byId = new Map(state.points.map((p) => [p.id, p]));
+    for (const sp of incoming.values()) {
+      const p = byId.get(sp.id);
+      if (!p) {
+        state.points.push({ id: sp.id, x: sp.x, y: sp.y, name: sp.name || "", cat: sp.cat, note: sp.note || "", found: false, created: Date.now(), src: sid });
+        changed = true;
+        continue;
+      }
+      // Point déjà présent (reçu avant, ou importé depuis un fichier) : on garde son crochet.
+      for (const k of ["x", "y", "name", "cat", "note"]) {
+        const v = sp[k] ?? (k === "name" || k === "note" ? "" : p[k]);
+        if (p[k] !== v) { p[k] = v; changed = true; }
+      }
+      if (p.src !== sid) { p.src = sid; changed = true; }
+    }
+    const before = state.points.length;
+    state.points = state.points.filter((p) => p.src !== sid || incoming.has(p.id));
+    if (state.points.length !== before) changed = true;
+    if (changed) {
+      migrateCategories(state);
+      save();
+      if (lastRoute) {
+        const ids = new Map(state.points.map((p) => [p.id, p]));
+        lastRoute.order = lastRoute.order.map((p) => ids.get(p.id)).filter(Boolean);
+        redrawRoute();
+      } else renderPoints();
+    }
+    return changed;
+  }
+
+  let followBusy = false;
+  async function refreshFollow(manual = false) {
+    const sid = state.follow?.sid;
+    if (!sid || !Share?.enabled || followBusy) { renderShare(); return; }
+    followBusy = true;
+    shareInfo = "Mise à jour…";
+    renderShare();
+    try {
+      const doc = await Share.fetchShare(sid);
+      if (!doc) shareInfo = "Carte introuvable : le lien est peut-être incomplet.";
+      else if (doc.stopped) shareInfo = "Le propriétaire a arrêté ce partage. Les points déjà reçus restent sur ta carte.";
+      else {
+        if (doc.name && doc.name !== state.follow.name) { state.follow.name = doc.name; save(); }
+        const changed = applyShare(sid, doc);
+        const n = state.points.filter((p) => p.src === sid).length;
+        shareInfo = `${n} points reçus${doc.at ? ", mis à jour le " + new Date(doc.at).toLocaleString("fr-CA", { dateStyle: "short", timeStyle: "short" }) : ""}.`;
+        if (manual) toast(changed ? "Carte partagée mise à jour." : "Déjà à jour.");
+      }
+    } catch (e) {
+      shareInfo = navigator.onLine === false ? "Hors ligne : mise à jour plus tard." : "Erreur de mise à jour : " + (e.message || e);
+    } finally {
+      followBusy = false;
+    }
+    renderShare();
+  }
+
+  async function followMap(sid) {
+    const mine = await myShareIds();
+    if (mine && mine.sid === sid) { toast("C'est ta propre carte partagée."); return; }
+    if (state.follow?.sid === sid) { refreshFollow(true); return; }
+    const msg = state.follow?.sid
+      ? "Suivre cette carte partagée à la place de celle que tu suis déjà ? Les points de l'ancienne carte seront retirés."
+      : "Suivre cette carte partagée ? Ses points seront ajoutés à ta carte et ses ajouts futurs arriveront tout seuls. Tes crochets restent à toi.";
+    if (!(await ask(msg, { ok: "Suivre" }))) return;
+    if (state.follow?.sid) state.points = state.points.filter((p) => p.src !== state.follow.sid);
+    state.follow = { sid, name: "", at: Date.now() };
+    save();
+    await refreshFollow(true);
+  }
+
+  async function unfollow() {
+    const sid = state.follow?.sid;
+    if (!sid) return;
+    const mode = await ask("Ne plus suivre cette carte ? Tu peux retirer ses points ou les garder comme les tiens (avec tes crochets).",
+      { ok: "Retirer ses points", choices: [{ label: "Les garder", value: "keep" }] });
+    if (!mode) return;
+    if (mode === "keep") for (const p of state.points) { if (p.src === sid) delete p.src; }
+    else state.points = state.points.filter((p) => p.src !== sid);
+    state.follow = { sid: null, at: Date.now() };
+    shareInfo = "";
+    save();
+    if (lastRoute) redrawRoute(); else renderPoints();
+    renderShare();
+  }
+
+  async function renderShare() {
+    if (!shareStatus) return;
+    shareActions.replaceChildren();
+    const lines = [];
+    if (!Share?.enabled) { shareStatus.textContent = "Partage indisponible (synchronisation non configurée)."; return; }
+    // Ma carte
+    if (state.share?.salt) {
+      lines.push(shareError ? "Ta carte est partagée, mais la dernière mise à jour a échoué. Nouvel essai bientôt." : "Ta carte est partagée : tes ajouts sont envoyés automatiquement (sans tes crochets).");
+      if (Sync?.code) shareActions.append(el("button", { class: "btn", onclick: showShareLink }, "Lien de partage"));
+      shareActions.append(el("button", { class: "link-btn", onclick: stopSharing }, "Arrêter le partage"));
+    } else {
+      shareActions.append(el("button", { class: "btn", onclick: startSharing }, "Partager ma carte"));
+    }
+    // Carte suivie
+    if (state.follow?.sid) {
+      lines.push(`Tu suis la carte de ${state.follow.name || "quelqu'un"}. ${shareInfo}`.trim());
+      shareActions.append(
+        el("button", { class: "btn", onclick: () => refreshFollow(true) }, "Mettre à jour"),
+        el("button", { class: "link-btn", onclick: unfollow }, "Ne plus suivre"),
+      );
+    }
+    if (!lines.length) lines.push("Partage tes points avec un ami : il les voit, avec ses propres crochets, sans pouvoir les modifier.");
+    shareStatus.textContent = lines.join(" ");
+  }
+
+  /** Lien « #map=… » ouvert (au chargement ou collé dans un onglet déjà ouvert). */
+  function readMapHash() {
+    const m = /[#&]map=([0-9a-f]{64})/.exec(location.hash);
+    if (!m) return;
+    history.replaceState(null, "", location.pathname + location.search);
+    followMap(m[1]);
+  }
+  window.addEventListener("hashchange", readMapHash);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && state.follow?.sid) refreshFollow(); });
+
   if (Sync) {
     Sync.init({
       getState: () => state,
       applyRemote,
-      onStatus: (s, detail) => { syncDetail = detail || ""; renderSync(); },
+      onStatus: (s, detail) => { syncDetail = detail || ""; renderSync(); renderShare(); },
       onLinked: () => toast("Appareil relié à ta sauvegarde en ligne."),
     });
   }
   renderSync();
+  renderShare();
+  readMapHash();
+  if (state.follow?.sid) refreshFollow();
+  scheduleSharePublish(1000);
 
   // Accès pour le débogage dans la console.
   window.leonida = { map, state, CRS, get roads() { return roads; }, redrawRoute };

@@ -1,11 +1,13 @@
 rules_version = '2';
 
 // Leonida Tracker : synchronisation sans compte.
-// Chaque sauvegarde est un document leonida_saves/{SHA-256 du code de synchro}.
-// On peut lire ou écrire un document seulement si on connaît son nom ;
-// lister la collection ou supprimer est interdit.
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // --- Sauvegardes personnelles ----------------------------------------------
+    // Un document leonida_saves/{SHA-256 du code de synchro}.
+    // On peut lire ou écrire un document seulement si on connaît son nom ;
+    // lister la collection ou supprimer est interdit.
     match /leonida_saves/{id} {
       allow get: if id.matches('^[0-9a-f]{64}$');
       allow create, update: if id.matches('^[0-9a-f]{64}$')
@@ -14,6 +16,50 @@ service cloud.firestore {
         && request.resource.data.json.size() < 1000000;
       allow list, delete: if false;
     }
+
+    // --- Cartes partagées en lecture seule ----------------------------------------
+    // leonida_shares/{sid} : lisible par quiconque a le lien (sid), modifiable
+    // seulement par le propriétaire, qui connaît le secret d'écriture « w ».
+    //   json : la carte (points sans les crochets) ; wh : SHA-256 de w ; n : nonce.
+    // leonida_proofs/{sid} : { w, n }, jamais lisible. Chaque publication écrit les
+    // deux documents ensemble avec un nouveau nonce ; la règle vérifie que la preuve
+    // écrite dans le même lot contient bien le secret (sha256(w) == wh).
+    function hexId(id) { return id.matches('^[0-9a-f]{64}$'); }
+    function sha(s) { return hashing.sha256(s).toHexString().lower(); }
+    function proofAfter(sid) { return getAfter(/databases/$(database)/documents/leonida_proofs/$(sid)).data; }
+    function shareAfter(sid) { return getAfter(/databases/$(database)/documents/leonida_shares/$(sid)).data; }
+    function validShare(d) {
+      return d.keys().hasOnly(['json', 'wh', 'n'])
+        && d.json is string && d.json.size() < 1000000
+        && d.wh is string && d.wh.matches('^[0-9a-f]{64}$')
+        && d.n is string && d.n.size() >= 16 && d.n.size() <= 64;
+    }
+
+    match /leonida_shares/{sid} {
+      allow get: if hexId(sid);
+      allow create: if hexId(sid)
+        && validShare(request.resource.data)
+        && proofAfter(sid).n == request.resource.data.n
+        && sha(proofAfter(sid).w) == request.resource.data.wh;
+      allow update: if hexId(sid)
+        && validShare(request.resource.data)
+        && request.resource.data.wh == resource.data.wh
+        && request.resource.data.n != resource.data.n
+        && proofAfter(sid).n == request.resource.data.n
+        && sha(proofAfter(sid).w) == resource.data.wh;
+      allow list, delete: if false;
+    }
+
+    match /leonida_proofs/{sid} {
+      allow create, update: if hexId(sid)
+        && request.resource.data.keys().hasOnly(['w', 'n'])
+        && request.resource.data.w is string && request.resource.data.w.size() == 64
+        && request.resource.data.n is string
+        && shareAfter(sid).n == request.resource.data.n
+        && sha(request.resource.data.w) == shareAfter(sid).wh;
+      allow get, list, delete: if false;
+    }
+
     // Tout le reste est fermé.
     match /{document=**} {
       allow read, write: if false;

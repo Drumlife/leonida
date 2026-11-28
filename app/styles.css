@@ -462,3 +462,4 @@ dialog.ask .btn-row { justify-content: flex-end; }
 dialog.ask .btn { width: auto; }
 dialog.ask .qr { display: flex; justify-content: center; margin: 0 auto 12px; padding: 10px; background: #fff; border-radius: 8px; width: fit-content; }
 dialog.ask .qr img, dialog.ask .qr canvas { display: block; }
+.popup .meta.shared { color: #38bdf8; margin-top: 4px; }
